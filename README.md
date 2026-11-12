@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/header.png" alt="bitwig-akai-lpd8-mk2: clip launcher and 64 assignable knobs for the Akai LPD8 mk2 in Bitwig Studio" width="100%">
+  <img src="assets/header.png" alt="bitwig-akai-lpd8-mk2: knobs that follow your device, plus a clip launcher, for the Akai LPD8 mk2 in Bitwig Studio" width="100%">
 </p>
 
 <p align="center">
@@ -7,7 +7,14 @@
   <img src="https://img.shields.io/badge/but_works_like_a-f%2Acking_charm-2EA043" alt="but works like a f*cking charm">
 </p>
 
-A Bitwig Studio controller script for the **Akai LPD8 mk2**. It turns the pads into a colour-coded clip launcher, and the knobs into 8 banks of freely assignable controls. It needs no setup on the controller itself.
+A Bitwig Studio controller script for the **Akai LPD8 mk2**. Plug it in and it just works:
+
+- **The 8 knobs control whatever device you've selected**, so you don't have to map anything. Click a synth and the knobs move its parameters. Click an effect and they move the effect's.
+- **The pads play your instruments and drums.**
+- **Hit CC and the pads launch the selected track's clips**, lit in each clip's colour.
+- **Hit Prog Chng and the pads move between tracks, devices and parameter pages** without touching the mouse.
+
+It needs no setup on the controller itself.
 
 > **Only for the LPD8 mk2.** The first-generation LPD8 (no coloured pads) is not supported.
 
@@ -21,6 +28,8 @@ A Bitwig Studio controller script for the **Akai LPD8 mk2**. It turns the pads i
 ## Install
 
 The whole script is **one file**: `AkaiLPD8mk2.control.js`. Installing means putting that file into Bitwig's *Controller Scripts* folder. Pick your system below.
+
+> **Updating?** Do exactly the same thing: the new file replaces the old one. Then quit Bitwig completely and start it again.
 
 ### Linux
 
@@ -105,41 +114,65 @@ You should now see **"LPD8 mk2 ready"**, and the pads light up.
 
 ## How to use it
 
-Use the mode buttons on the LPD8 mk2 to choose what the pads do.
+### Knobs: they follow the selected device
 
-### CC mode: clip launcher
+Click any device in Bitwig: an instrument, an effect or a plugin. The 8 knobs now control that device's **Remote Controls**, the 8 parameters Bitwig shows in the device's *Remote Controls* panel. Bitwig highlights the parameters the knobs are on. Select another device and the knobs follow.
+
+**Pickup:** after you switch device, page or bank, a knob doesn't do anything until you turn it past the parameter's current value. Then it grabs the parameter and follows smoothly. This stops sounds from jumping when the knob and the parameter don't match. If you'd rather the value jumps straight to the knob, set **Knob takeover** to **Jump** in *Settings → Controllers*, under the LPD8 mk2.
+
+### The pad modes
+
+The **Note**, **CC** and **Prog Chng** buttons on the LPD8 mk2 choose what the pads do. The pad lights switch to that mode's layout as soon as you hit a pad. Pads 1–4 are the bottom row, and pads 5–8 the top row.
+
+#### Note mode: play instruments
+
+The pads play notes on the selected track, with pressure, and light up while you hold them. On a Drum Machine, pads 1–8 play its first 8 pads.
+
+#### CC mode: clips of the selected track
 
 ```
   ┌──────────────┬──────────────┬──────────────┬──────────────┐
-  │  launch      │  launch      │  launch      │  scene       │
-  │  track 1     │  track 2     │  scene       │  up          │
+  │  5           │  6           │  7           │  8           │
+  │  clip 1      │  clip 2      │  clip 3      │  clip 4      │
   ├──────────────┼──────────────┼──────────────┼──────────────┤
-  │  stop        │  stop        │  stop        │  scene       │
-  │  track 1     │  track 2     │  all         │  down        │
+  │  1           │  2           │  3           │  4           │
+  │  stop track  │  stop all    │  previous    │  next        │
+  │              │  clips       │  4 clips     │  4 clips     │
   └──────────────┴──────────────┴──────────────┴──────────────┘
 ```
 
-It controls the first two tracks and one scene, and the scene buttons move that window up and down. The two launch pads show what's going on:
+The top row is the first 4 clip slots of the track you've selected. Select a track with the mouse, or with Prog Chng mode, and the top row follows. Bitwig draws a frame around the 4 slots the pads are on. Pads 3 and 4 move that frame to the previous or next 4 slots.
 
-| Pad colour      | Meaning                         |
-|-----------------|---------------------------------|
-| off             | empty slot                      |
-| amber           | there's a clip in the slot      |
-| green           | playing                         |
-| blinking green  | queued, starts on the next beat |
-| blinking red    | stopping on the next beat       |
+Each clip pad lights up in **the clip's own colour**:
 
-### PAD mode: play instruments
+| Clip pad          | Meaning                                         |
+|-------------------|-------------------------------------------------|
+| off               | empty slot                                      |
+| dim               | there's a clip, not playing                     |
+| bright            | playing                                         |
+| blinking          | starts on the next beat                         |
+| red               | recording                                       |
+| blinking red      | about to stop, or about to start recording      |
 
-The pads play notes on the selected track, with pressure.
+Hit a clip pad to launch the clip. On a track that's armed for recording, hitting an empty pad records a new clip there.
 
-### Knobs: 64 assignable controls
+#### Prog Chng mode: get around without the mouse
 
-The 8 knobs control 8 *banks* of 8 controls each. To pick a bank, switch to **PROG CHNG** mode and hit pad 1–8 (pad N = bank N). Bitwig shows which bank is active.
+```
+  ┌──────────────┬──────────────┬──────────────┬──────────────┐
+  │  5           │  6           │  7           │  8           │
+  │  previous    │  next        │  previous    │  next        │
+  │  page        │  page        │  device      │  device      │
+  ├──────────────┼──────────────┼──────────────┼──────────────┤
+  │  1           │  2           │  3           │  4           │
+  │  previous    │  next        │  knobs:      │  next user   │
+  │  track       │  track       │  device/user │  bank        │
+  └──────────────┴──────────────┴──────────────┴──────────────┘
+```
 
-To assign a knob, right-click a parameter in Bitwig, choose **Map to Controller or Key**, and turn the knob.
+A popup tells you where you landed, for example *"Polysynth - Filter"*. A pad goes dark when there's nowhere further to go in that direction.
 
-> When you switch banks, a control jumps to wherever the physical knob is when you first move it.
+**User banks** give you 64 more knobs (8 banks of 8) that you map yourself. Hit pad 3 (**knobs: device/user**) to switch the knobs to them, and pad 4 (**next user bank**) to step through the banks. To map one, right-click a parameter in Bitwig, choose **Map to Controller or Key**, and turn the knob. Hit pad 3 again to go back to device control.
 
 ### Your own LPD8 mk2 programs work too
 
@@ -156,15 +189,18 @@ If you change the programs with Akai's editor while Bitwig is running, switch th
 | **LPD8 mk2** isn't in the *Add Controller* list | The file isn't in the right place, or it isn't named right. It must be in `Bitwig Studio/Controller Scripts/` and end in **`.control.js`**. Then restart Bitwig. |
 | Popup: *"no reply - check the controller's MIDI output port"* | In *Settings → Controllers*, set the controller's **output** to LPD8 mk2. |
 | Popup: *"This is an original LPD8"* | This script only works with the LPD8 **mk2**. |
+| A knob does nothing | That's pickup: turn it past the parameter's current value. Also check that a device is selected, or set **Knob takeover** to **Jump**. |
 | Pads play notes but don't launch clips | Press the **CC** button on the LPD8 mk2. |
+| Pad lights show the wrong layout | Hit any pad once. The controller doesn't report mode changes, so the lights switch on the first pad hit. |
 | Every second pad press is ignored | That pad is set to *toggle* in your program. Set it to *momentary*. |
+| Error after updating: *"This cannot be called when specifying required API version 1"* | Quit Bitwig completely and start it again. Bitwig only re-reads controller scripts on startup. |
 | Something else | Open Bitwig's **Controller Script Console**. The script writes what it found and anything it ignored there, starting with `LPD8 mk2:`. |
 
 ---
 
 ## Compatibility
 
-Developed and tested on Bitwig Studio 4.4 with a real LPD8 mk2. The script uses Bitwig's long-standing controller API (version 1), which Bitwig Studio 6.1 still ships and supports, so newer versions should work as well.
+Developed and tested on Bitwig Studio 4.4 with a real LPD8 mk2. The script uses version 10 of Bitwig's controller API. Everything it uses is still in Bitwig Studio 6.1 unchanged, so newer versions should work as well.
 
 ## Development
 

@@ -1,4 +1,4 @@
-// Akai LPD8 mk2 control script for Bitwig Studio (control surface API v1).
+// Akai LPD8 mk2 control script for Bitwig Studio.
 // https://github.com/relatively-okay/bitwig-akai-lpd8-mk2
 //
 // This script is deliberately a single, plain-ASCII, ES5 file that loads no
@@ -8,12 +8,17 @@
 // request) and reads its four programs (read-only), then maps knobs and pads
 // from what the controller actually sends. Nothing is ever written to the
 // programs stored on the controller.
+//
+//   Knobs           : the selected device's Remote Controls (or user controls)
+//   Note mode       : pads play notes
+//   CC mode         : clip launcher for the selected track
+//   PROG CHNG mode  : navigation (tracks, devices, pages, knob mode)
 
-loadAPI(1);
+loadAPI(10);
 
 host.defineController(
 	"Akai", "LPD8 mk2",
-	"1.0.0", "98c57dd9-d6d9-400c-a9aa-a86db300f2cb"
+	"2.0.0", "98c57dd9-d6d9-400c-a9aa-a86db300f2cb"
 );
 host.defineMidiPorts( 1, 1 );
 host.addDeviceNameBasedDiscoveryPair( ["LPD8 mk2 MIDI 1"], ["LPD8 mk2 MIDI 1"] );
@@ -27,10 +32,12 @@ host.addDeviceNameBasedDiscoveryPair( ["LPD8 mk2"], ["LPD8 mk2"] );
 var PADS = 8;
 var KNOBS = 8;
 var PROGRAMS = 4;
-var KNOB_BANKS = 8;
+var USER_BANKS = 8;
 
 var REPLY_TIMEOUT_MS = 1000;
 var BLINK_MS = 150;
+var ANNOUNCE_DELAY_MS = 150;
+var PICKUP_WINDOW = 2;
 
 var AKAI = 0x47;
 var MODEL_MK2 = 0x4c;
@@ -39,20 +46,42 @@ var MODEL_LPD8_ORIGINAL = 0x75;
 var SYSEX_IDENTITY_REQUEST = "F0 7E 7F 06 01 F7";
 var SYSEX_PAD_COLORS = "F0 47 7F 4C 06 00 30";
 
-var OFF            = [ 0, 0, 0 ];
-var COLOR_STOP     = [ 60, 0, 0 ];
-var COLOR_SCENE    = [ 0, 60, 0 ];
-var COLOR_NAV      = [ 40, 40, 40 ];
-var COLOR_CLIP     = [ 90, 45, 0 ];
-var COLOR_PLAYING  = [ 0, 255, 0 ];
-var COLOR_STOPPING = [ 255, 0, 0 ];
+// Pad modes, as selected with the buttons on the LPD8 mk2. The controller
+// doesn't report its mode, so the script infers it from what the pads send.
+var MODE_NOTE = "note", MODE_CC = "cc", MODE_PROG = "prog";
+var MODES = [ MODE_NOTE, MODE_CC, MODE_PROG ];
 
-// Pad ids (0-7) in CC mode. LPD8 mk2 layout:
+var KNOBS_DEVICE = "device", KNOBS_USER = "user";
+
+var CLIP_SLOTS = 4;
+var CLIP_DIM = 0.2;            // brightness of a clip that isn't playing
+
+var OFF            = [ 0, 0, 0 ];
+var COLOR_NOTE     = [ 0, 0, 40 ];
+var COLOR_NOTE_HIT = [ 60, 120, 255 ];
+var COLOR_STOP     = [ 60, 0, 0 ];
+var COLOR_NAV      = [ 40, 40, 40 ];
+var COLOR_CLIP     = [ 255, 128, 0 ];   // for clips without a colour
+var COLOR_RED      = [ 255, 0, 0 ];
+var COLOR_TRACK    = [ 50, 50, 50 ];
+var COLOR_DEVICE   = [ 70, 0, 100 ];
+var COLOR_PAGE     = [ 0, 60, 90 ];
+var COLOR_MODE_DEVICE = [ 0, 150, 220 ];
+var COLOR_MODE_USER   = [ 220, 110, 0 ];
+var COLOR_USER_BANK   = [ 90, 45, 0 ];
+
+// Pad ids 0-7. LPD8 mk2 layout: pads 5-8 on top, pads 1-4 below.
 //
-//   [ 4: launch T1 ] [ 5: launch T2 ] [ 6: launch scene ] [ 7: scene up   ]
-//   [ 0: stop T1   ] [ 1: stop T2   ] [ 2: stop all     ] [ 3: scene down ]
-var PAD_STOP_T1 = 0, PAD_STOP_T2 = 1, PAD_STOP_ALL = 2, PAD_SCENE_DOWN = 3;
-var PAD_LAUNCH_T1 = 4, PAD_LAUNCH_T2 = 5, PAD_LAUNCH_SCENE = 6, PAD_SCENE_UP = 7;
+// CC mode (clip launcher for the selected track):
+//   [ 4: clip 1     ] [ 5: clip 2   ] [ 6: clip 3       ] [ 7: clip 4       ]
+//   [ 0: stop track ] [ 1: stop all ] [ 2: prev 4 clips ] [ 3: next 4 clips ]
+var PAD_STOP_TRACK = 0, PAD_STOP_ALL = 1, PAD_PREV_CLIPS = 2, PAD_NEXT_CLIPS = 3, PAD_FIRST_CLIP = 4;
+
+// PROG CHNG mode (navigation):
+//   [ 4: prev page  ] [ 5: next page  ] [ 6: prev device ] [ 7: next device ]
+//   [ 0: prev track ] [ 1: next track ] [ 2: knob mode   ] [ 3: user bank   ]
+var NAV_PREV_TRACK = 0, NAV_NEXT_TRACK = 1, NAV_KNOB_MODE = 2, NAV_USER_BANK = 3;
+var NAV_PREV_PAGE = 4, NAV_NEXT_PAGE = 5, NAV_PREV_DEVICE = 6, NAV_NEXT_DEVICE = 7;
 
 
 // ===========================================================================
@@ -83,7 +112,7 @@ function startsWith( bytes, prefix ) {
 }
 
 function later( fn, ms ) {
-	host.scheduleTask( fn, [], ms );
+	host.scheduleTask( guarded( "scheduled task", fn ), ms );
 }
 
 function log( text ) {
@@ -104,13 +133,14 @@ function guarded( name, fn ) {
 
 
 // ===========================================================================
-//  Mapping: which CC / program change belongs to which knob or pad
+//  Mapping: which note / CC / program change belongs to which knob or pad
 // ===========================================================================
 
 function Mapping() {
 	this.knobCC = {};
 	this.padCC = {};
 	this.padPC = {};
+	this.padNote = {};
 	this.warnings = [];
 }
 
@@ -118,12 +148,13 @@ Mapping.prototype.add = function( kind, number, index, program ) {
 	var table = this[kind];
 	var other = kind === "knobCC" ? this.padCC : ( kind === "padCC" ? this.knobCC : null );
 	var what = kind === "knobCC" ? "knob" : "pad";
+	var label = { knobCC: "CC ", padCC: "CC ", padPC: "PC ", padNote: "note " }[kind];
 	if ( other !== null && other[number] !== undefined ) {
 		this.warnings.push( "program " + program + ": CC " + number + " is used by both a knob and a pad; keeping the first" );
 		return;
 	}
 	if ( table[number] !== undefined && table[number] !== index ) {
-		this.warnings.push( "program " + program + ": " + ( kind === "padPC" ? "PC " : "CC " ) + number +
+		this.warnings.push( "program " + program + ": " + label + number +
 			" is " + what + " " + ( index + 1 ) + " here but " + what + " " + ( table[number] + 1 ) +
 			" in an earlier program; keeping the first" );
 		return;
@@ -136,6 +167,7 @@ Mapping.prototype.addProgram = function( p ) {
 	for ( var j = 0; j < PADS; j++ ) {
 		this.add( "padCC", p.padCC[j], j, p.program );
 		this.add( "padPC", p.padPC[j], j, p.program );
+		this.add( "padNote", p.padNote[j], j, p.program );
 	}
 };
 
@@ -146,7 +178,7 @@ Mapping.prototype.describe = function() {
 		return out.join( " " );
 	}
 	return "knob CCs [" + list( this.knobCC ) + "] pad CCs [" + list( this.padCC ) +
-		"] pad PCs [" + list( this.padPC ) + "]";
+		"] pad PCs [" + list( this.padPC ) + "] pad notes [" + list( this.padNote ) + "]";
 };
 
 // LPD8 mk2 factory programs (identical in all four programs).
@@ -156,6 +188,7 @@ function factoryMapping() {
 		m.knobCC[70 + i] = i;
 		m.padCC[12 + i] = i;
 		m.padPC[i] = i;
+		m.padNote[36 + i] = i;
 	}
 	return m;
 }
@@ -177,8 +210,9 @@ function parseProgram( b ) {
 	if ( b.length !== 173 || !startsWith( b, [ 0xf0, AKAI, null, MODEL_MK2, 0x03 ] ) || b[172] !== 0xf7 ) {
 		return null;
 	}
-	var p = { program: b[7], knobCC: [], padCC: [], padPC: [] };
+	var p = { program: b[7], knobCC: [], padCC: [], padPC: [], padNote: [] };
 	for ( var i = 0; i < PADS; i++ ) {
+		p.padNote.push( b[12 + 16 * i] );
 		p.padCC.push( b[12 + 16 * i + 1] );
 		p.padPC.push( b[12 + 16 * i + 2] );
 	}
@@ -201,13 +235,18 @@ function LPD8mk2( midi_in, midi_out, handlers ) {
 	var pending = null;            // { kind, token } of the outstanding request
 	var token = 0;
 	var reported = {};             // unmapped messages already logged
+	var mode = MODE_NOTE;
 
-	var leds = [];
+	// One LED layer per pad mode; the current mode's layer is shown.
+	var layers = {};
 	var blink_phase = true;
 	var last_sysex = null;
 	var running = true;
 
-	for ( var i = 0; i < PADS; i++ ) leds[i] = { color: OFF, blink: false };
+	for ( var m = 0; m < MODES.length; m++ ) {
+		layers[MODES[m]] = [];
+		for ( var i = 0; i < PADS; i++ ) layers[MODES[m]][i] = { color: OFF, blink: false };
+	}
 
 
 	// --- Startup handshake ------------------------------------------------
@@ -278,15 +317,36 @@ function LPD8mk2( midi_in, midi_out, handlers ) {
 
 	// --- MIDI input -------------------------------------------------------
 
+	function setMode( new_mode ) {
+		if ( new_mode === mode ) return;
+		mode = new_mode;
+		flush();
+	}
+
 	function onMidi( status, data1, data2 ) {
 		var type = status & 0xf0;
 		var index;
 		if ( type === 0xb0 ) {
 			if ( ( index = mapping.knobCC[data1] ) !== undefined ) return handlers.knob( index, data2 );
-			if ( ( index = mapping.padCC[data1] ) !== undefined ) return handlers.pad( index, data2 );
+			if ( ( index = mapping.padCC[data1] ) !== undefined ) {
+				setMode( MODE_CC );
+				return handlers.padCC( index, data2 );
+			}
 		}
 		if ( type === 0xc0 ) {
-			if ( ( index = mapping.padPC[data1] ) !== undefined ) return handlers.program( index );
+			if ( ( index = mapping.padPC[data1] ) !== undefined ) {
+				setMode( MODE_PROG );
+				return handlers.padPC( index );
+			}
+		}
+		if ( type === 0x90 || type === 0x80 ) {
+			// The notes themselves reach instruments through the note input;
+			// this only drives the pad lights.
+			if ( ( index = mapping.padNote[data1] ) !== undefined ) {
+				setMode( MODE_NOTE );
+				return handlers.padNote( index, type === 0x90 ? data2 : 0 );
+			}
+			return;
 		}
 		reportUnmapped( status, data1 );
 	}
@@ -320,6 +380,7 @@ function LPD8mk2( midi_in, midi_out, handlers ) {
 
 	function flush() {
 		if ( !identified ) return;
+		var leds = layers[mode];
 		var bytes = [];
 		for ( var i = 0; i < PADS; i++ ) {
 			var c = ( leds[i].blink && !blink_phase ) ? OFF : leds[i].color;
@@ -337,23 +398,23 @@ function LPD8mk2( midi_in, midi_out, handlers ) {
 		if ( !running ) return;
 		blink_phase = !blink_phase;
 		flush();
-		later( guarded( "blink", blinkLoop ), BLINK_MS );
+		later( blinkLoop, BLINK_MS );
 	}
 
 
 	// --- Public -----------------------------------------------------------
 
-	// color: [r, g, b] with 0-255 components; blink: optional bool
-	this.setPadColor = function( id, color, blink ) {
-		leds[id] = { color: color, blink: !!blink };
-		flush();
+	// layer: MODE_*; color: [r, g, b] with 0-255 components; blink: optional bool
+	this.setPadColor = function( layer, id, color, blink ) {
+		layers[layer][id] = { color: color, blink: !!blink };
+		if ( layer === mode ) flush();
 		return self;
 	};
 
 	this.stop = function() {
-		for ( var i = 0; i < PADS; i++ ) leds[i] = { color: OFF, blink: false };
-		flush();
 		running = false;
+		for ( var i = 0; i < PADS; i++ ) layers[mode][i] = { color: OFF, blink: false };
+		flush();
 		return self;
 	};
 
@@ -368,83 +429,232 @@ function LPD8mk2( midi_in, midi_out, handlers ) {
 //  Bitwig wiring
 // ===========================================================================
 
-var controller, tracks, userctl, knob_bank = 0;
+var controller, cursorTrack, cursorDevice, remote, userControls, clipSlots, allScenes, takeover;
+var knob_mode = KNOBS_DEVICE;
+var user_bank = 0;
+
+// Soft takeover state per physical knob.
+var knob_last = [];     // last raw value the knob sent
+var knob_synced = [];   // knob has caught up with its current target
+
+function resetTakeover() {
+	for ( var i = 0; i < KNOBS; i++ ) knob_synced[i] = false;
+}
+
+function knobTarget( i ) {
+	return knob_mode === KNOBS_DEVICE ? remote.getParameter( i ) : userControls.getControl( user_bank * KNOBS + i );
+}
+
+function onKnob( i, value ) {
+	var p = knobTarget( i );
+	var last = knob_last[i];
+	knob_last[i] = value;
+	if ( knob_mode === KNOBS_DEVICE && !p.exists().get() ) return;
+
+	if ( !knob_synced[i] && takeover.get() === "Pickup" ) {
+		// Only take over once the knob reaches the parameter's current value,
+		// so switching pages, devices or banks never makes values jump.
+		var target = p.value().get() * 127;
+		var reached = Math.abs( value - target ) <= PICKUP_WINDOW ||
+			( last !== undefined && ( last - target ) * ( value - target ) <= 0 );
+		if ( !reached ) return;
+	}
+	knob_synced[i] = true;
+	p.value().set( value, 128 );
+}
+
+// Shows where a navigation pad took you. Track and device names arrive from
+// Bitwig a moment after the move, hence the delay.
+function announce( what ) {
+	if ( what === "knobs" && knob_mode === KNOBS_USER ) {
+		host.showPopupNotification( "Knobs: user bank " + ( user_bank + 1 ) );
+		return;
+	}
+	later( function() {
+		if ( what === "clips" ) {
+			var first = clipSlots.scrollPosition().get() + 1;
+			host.showPopupNotification( "Clips " + first + "-" + ( first + CLIP_SLOTS - 1 ) );
+			return;
+		}
+		if ( what === "track" ) {
+			host.showPopupNotification( "Track: " + ( cursorTrack.name().get() || "-" ) );
+			return;
+		}
+		if ( !cursorDevice.exists().get() ) {
+			host.showPopupNotification( "Knobs: no device selected" );
+			return;
+		}
+		var pages = remote.pageNames().get();
+		var page = pages[ remote.selectedPageIndex().get() ];
+		host.showPopupNotification( cursorDevice.name().get() + ( page ? " - " + page : "" ) );
+	}, ANNOUNCE_DELAY_MS );
+}
 
 function init() {
 
-	// Pads in PAD mode play notes (any channel), including pad pressure.
-	host.getMidiInPort(0).createNoteInput( "LPD8 mk2 Pads", "8?????", "9?????", "A?????", "D?????" );
+	// Pads in Note mode play notes (any channel), including pad pressure.
+	// The notes are also passed to the script so the pads can light up.
+	var noteInput = host.getMidiInPort(0).createNoteInput( "LPD8 mk2 Pads", "8?????", "9?????", "A?????", "D?????" );
+	noteInput.setShouldConsumeEvents( false );
 
-	tracks = host.createTrackBank( 2, 0, 1 );
-	userctl = host.createUserControlsSection( KNOB_BANKS * KNOBS );
+	takeover = host.getPreferences().getEnumSetting( "Knob takeover", "Knobs", [ "Pickup", "Jump" ], "Pickup" );
+	takeover.markInterested();
 
-	for ( var i = 0; i < KNOB_BANKS * KNOBS; i++ ) {
-		userctl.getControl(i).setLabel( "Bank " + ( Math.floor( i / KNOBS ) + 1 ) + " Knob " + ( i % KNOBS + 1 ) );
+	// Knobs: the selected device's Remote Controls, or user controls.
+	cursorTrack = host.createCursorTrack( "LPD8MK2_CURSOR", "LPD8 mk2", 0, CLIP_SLOTS, true );
+	cursorDevice = cursorTrack.createCursorDevice();
+	remote = cursorDevice.createCursorRemoteControlsPage( KNOBS );
+	userControls = host.createUserControls( USER_BANKS * KNOBS );
+
+	cursorTrack.name().markInterested();
+	cursorDevice.exists().markInterested();
+	cursorDevice.name().markInterested();
+	remote.pageNames().markInterested();
+
+	for ( var i = 0; i < KNOBS; i++ ) {
+		var p = remote.getParameter( i );
+		p.exists().markInterested();
+		p.value().markInterested();
+		p.setIndication( true );
 	}
+	for ( var u = 0; u < USER_BANKS * KNOBS; u++ ) {
+		var c = userControls.getControl( u );
+		c.value().markInterested();
+		c.setLabel( "User bank " + ( Math.floor( u / KNOBS ) + 1 ) + " knob " + ( u % KNOBS + 1 ) );
+	}
+
+	// A new target for the knobs: they must pick up again.
+	remote.selectedPageIndex().addValueObserver( function() { resetTakeover(); updateNavLeds(); } );
+	remote.pageCount().addValueObserver( function() { updateNavLeds(); } );
+	cursorDevice.name().addValueObserver( function() { resetTakeover(); } );
+	cursorDevice.position().addValueObserver( function() { resetTakeover(); } );
+	cursorTrack.hasPrevious().addValueObserver( function() { updateNavLeds(); } );
+	cursorTrack.hasNext().addValueObserver( function() { updateNavLeds(); } );
+	cursorDevice.hasPrevious().addValueObserver( function() { updateNavLeds(); } );
+	cursorDevice.hasNext().addValueObserver( function() { updateNavLeds(); } );
+
+	// Clip launcher: four clip slots of the selected track.
+	clipSlots = cursorTrack.clipLauncherSlotBank();
+	clipSlots.setIndication( true );
+	clipSlots.scrollPosition().markInterested();
+	clipSlots.canScrollBackwards().addValueObserver( function() { updateClipNavLeds(); } );
+	clipSlots.canScrollForwards().addValueObserver( function() { updateClipNavLeds(); } );
+	allScenes = host.createMainTrackBank( 1, 0, 1 ).sceneBank();
 
 	controller = new LPD8mk2( host.getMidiInPort(0), host.getMidiOutPort(0), {
 
-		// Knobs: 8 banks of freely assignable controls.
-		knob: function( id, value ) {
-			userctl.getControl( knob_bank * KNOBS + id ).set( value, 128 );
-		},
+		knob: onKnob,
 
-		// PROG CHNG mode: pad N selects knob bank N.
-		program: function( pad ) {
-			knob_bank = pad % KNOB_BANKS;
-			host.showPopupNotification( "LPD8 mk2 knob bank " + ( knob_bank + 1 ) );
+		// Note mode: light the pad while it is held.
+		padNote: function( id, velocity ) {
+			controller.setPadColor( MODE_NOTE, id, velocity > 0 ? COLOR_NOTE_HIT : COLOR_NOTE );
 		},
 
 		// CC mode: clip launcher.
-		pad: function( id, value ) {
+		padCC: function( id, value ) {
 			if ( value === 0 ) return;
+			if ( id >= PAD_FIRST_CLIP ) return clipSlots.launch( id - PAD_FIRST_CLIP );
 			switch ( id ) {
-				case PAD_STOP_T1:      return tracks.getTrack(0).stop();
-				case PAD_STOP_T2:      return tracks.getTrack(1).stop();
-				case PAD_LAUNCH_T1:    return tracks.getTrack(0).getClipLauncherSlots().launch(0);
-				case PAD_LAUNCH_T2:    return tracks.getTrack(1).getClipLauncherSlots().launch(0);
-				case PAD_LAUNCH_SCENE: return tracks.launchScene(0);
-				case PAD_STOP_ALL:     return tracks.getClipLauncherScenes().stop();
-				case PAD_SCENE_UP:     return tracks.scrollScenesUp();
-				case PAD_SCENE_DOWN:   return tracks.scrollScenesDown();
+				case PAD_STOP_TRACK: return cursorTrack.stop();
+				case PAD_STOP_ALL:   return allScenes.stop();
+				case PAD_PREV_CLIPS: clipSlots.scrollPageBackwards(); return announce( "clips" );
+				case PAD_NEXT_CLIPS: clipSlots.scrollPageForwards(); return announce( "clips" );
 			}
+		},
+
+		// PROG CHNG mode: navigation.
+		padPC: function( id ) {
+			switch ( id ) {
+				case NAV_PREV_TRACK:  cursorTrack.selectPrevious(); return announce( "track" );
+				case NAV_NEXT_TRACK:  cursorTrack.selectNext(); return announce( "track" );
+				case NAV_PREV_DEVICE: cursorDevice.selectPrevious(); return announce( "device" );
+				case NAV_NEXT_DEVICE: cursorDevice.selectNext(); return announce( "device" );
+				case NAV_PREV_PAGE:   remote.selectPreviousPage( false ); return announce( "device" );
+				case NAV_NEXT_PAGE:   remote.selectNextPage( false ); return announce( "device" );
+				case NAV_KNOB_MODE:
+					knob_mode = knob_mode === KNOBS_DEVICE ? KNOBS_USER : KNOBS_DEVICE;
+					break;
+				case NAV_USER_BANK:
+					if ( knob_mode === KNOBS_USER ) user_bank = ( user_bank + 1 ) % USER_BANKS;
+					knob_mode = KNOBS_USER;
+					break;
+			}
+			resetTakeover();
+			updateNavLeds();
+			announce( "knobs" );
 		}
 	});
 
-	// Static pad colours
-	controller.setPadColor( PAD_STOP_T1, COLOR_STOP );
-	controller.setPadColor( PAD_STOP_T2, COLOR_STOP );
-	controller.setPadColor( PAD_STOP_ALL, COLOR_STOP );
-	controller.setPadColor( PAD_LAUNCH_SCENE, COLOR_SCENE );
-	controller.setPadColor( PAD_SCENE_UP, COLOR_NAV );
-	controller.setPadColor( PAD_SCENE_DOWN, COLOR_NAV );
+	// Note mode lights
+	for ( var n = 0; n < PADS; n++ ) controller.setPadColor( MODE_NOTE, n, COLOR_NOTE );
 
-	// Clip state feedback on the launch pads
-	for ( var t = 0; t < 2; t++ ) (function( pad, slots ) {
-		var s = { content: false, playing: false, queued: false, stopping: false };
+	// CC mode lights: each clip pad shows its clip in the clip's own colour,
+	// dim when stopped, bright when playing, blinking when about to start.
+	// Red: recording (blinking: about to stop or start recording).
+	controller.setPadColor( MODE_CC, PAD_STOP_TRACK, COLOR_STOP );
+	controller.setPadColor( MODE_CC, PAD_STOP_ALL, COLOR_STOP );
+
+	for ( var k = 0; k < CLIP_SLOTS; k++ ) (function( pad, slot ) {
+		var s = { content: false, color: COLOR_CLIP, playing: false, queued: false, stopping: false,
+			recording: false, recordQueued: false };
+
+		function scaled( f ) {
+			return [ Math.round( s.color[0] * f ), Math.round( s.color[1] * f ), Math.round( s.color[2] * f ) ];
+		}
 
 		function update() {
-			if ( s.stopping )     controller.setPadColor( pad, COLOR_STOPPING, true );
-			else if ( s.queued )  controller.setPadColor( pad, COLOR_PLAYING, true );
-			else if ( s.playing ) controller.setPadColor( pad, COLOR_PLAYING );
-			else if ( s.content ) controller.setPadColor( pad, COLOR_CLIP );
-			else                  controller.setPadColor( pad, OFF );
+			if ( s.recording )                       controller.setPadColor( MODE_CC, pad, COLOR_RED );
+			else if ( s.recordQueued || s.stopping ) controller.setPadColor( MODE_CC, pad, COLOR_RED, true );
+			else if ( s.queued )                     controller.setPadColor( MODE_CC, pad, scaled( 1 ), true );
+			else if ( s.playing )                    controller.setPadColor( MODE_CC, pad, scaled( 1 ) );
+			else if ( s.content )                    controller.setPadColor( MODE_CC, pad, scaled( CLIP_DIM ) );
+			else                                     controller.setPadColor( MODE_CC, pad, OFF );
 		}
 
-		slots.setIndication( true );
-		slots.addHasContentObserver( function( slot, v ) { s.content = v; update(); } );
-		slots.addIsPlayingObserver( function( slot, v ) { s.playing = v; update(); } );
-		slots.addIsQueuedObserver( function( slot, v ) { s.queued = v; update(); } );
-		try {
-			slots.addIsStopQueuedObserver( function( slot, v ) { s.stopping = v; update(); } );
-		} catch ( e ) {
-			log( "stop-queued feedback unavailable: " + e );
-		}
-	})( PAD_LAUNCH_T1 + t, tracks.getTrack(t).getClipLauncherSlots() );
+		slot.hasContent().addValueObserver( function( v ) { s.content = v; update(); } );
+		slot.color().addValueObserver( function( r, g, b ) {
+			// Clips without a colour come through as black.
+			s.color = ( r + g + b < 0.05 ) ? COLOR_CLIP : [ r * 255, g * 255, b * 255 ];
+			update();
+		} );
+		slot.isPlaying().addValueObserver( function( v ) { s.playing = v; update(); } );
+		slot.isPlaybackQueued().addValueObserver( function( v ) { s.queued = v; update(); } );
+		slot.isStopQueued().addValueObserver( function( v ) { s.stopping = v; update(); } );
+		slot.isRecording().addValueObserver( function( v ) { s.recording = v; update(); } );
+		slot.isRecordingQueued().addValueObserver( function( v ) { s.recordQueued = v; update(); } );
+	})( PAD_FIRST_CLIP + k, clipSlots.getItemAt( k ) );
+
+	resetTakeover();
+	updateNavLeds();
+	updateClipNavLeds();
+}
+
+// CC mode: the clip scroll pads go dark where there are no more clips.
+function updateClipNavLeds() {
+	if ( !controller ) return;
+	controller.setPadColor( MODE_CC, PAD_PREV_CLIPS, clipSlots.canScrollBackwards().get() ? COLOR_NAV : OFF );
+	controller.setPadColor( MODE_CC, PAD_NEXT_CLIPS, clipSlots.canScrollForwards().get() ? COLOR_NAV : OFF );
+}
+
+// PROG CHNG mode lights; arrows go dark where there is nowhere to go.
+function updateNavLeds() {
+	if ( !controller ) return;
+	var page = remote.selectedPageIndex().get(), pages = remote.pageCount().get();
+	function nav( id, available, color ) {
+		controller.setPadColor( MODE_PROG, id, available ? color : OFF );
+	}
+	nav( NAV_PREV_TRACK, cursorTrack.hasPrevious().get(), COLOR_TRACK );
+	nav( NAV_NEXT_TRACK, cursorTrack.hasNext().get(), COLOR_TRACK );
+	nav( NAV_PREV_DEVICE, cursorDevice.hasPrevious().get(), COLOR_DEVICE );
+	nav( NAV_NEXT_DEVICE, cursorDevice.hasNext().get(), COLOR_DEVICE );
+	nav( NAV_PREV_PAGE, page > 0, COLOR_PAGE );
+	nav( NAV_NEXT_PAGE, page < pages - 1, COLOR_PAGE );
+	controller.setPadColor( MODE_PROG, NAV_KNOB_MODE, knob_mode === KNOBS_DEVICE ? COLOR_MODE_DEVICE : COLOR_MODE_USER );
+	controller.setPadColor( MODE_PROG, NAV_USER_BANK, knob_mode === KNOBS_USER ? COLOR_MODE_USER : COLOR_USER_BANK );
 }
 
 function exit() {
-	tracks.getTrack(0).getClipLauncherSlots().setIndication( false );
-	tracks.getTrack(1).getClipLauncherSlots().setIndication( false );
+	clipSlots.setIndication( false );
+	for ( var i = 0; i < KNOBS; i++ ) remote.getParameter( i ).setIndication( false );
 	controller.stop();
 }

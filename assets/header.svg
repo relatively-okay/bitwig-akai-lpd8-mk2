@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-labelledby="t d">
   <title id="t">bitwig-akai-lpd8-mk2</title>
-  <desc id="d">Clip launcher and 64 assignable knobs for the Akai LPD8 mk2 in Bitwig Studio. Illustration of an eight-pad, eight-knob controller with pads lit amber, green and red.</desc>
+  <desc id="d">Knobs that follow the selected device, plus a clip launcher, for the Akai LPD8 mk2 in Bitwig Studio. Illustration of an eight-pad, eight-knob controller with pads lit amber, green and red.</desc>
   <defs>
     <!-- Banner background -->
     <clipPath id="frame"><rect width="1280" height="400" rx="28"/></clipPath>
@@ -136,7 +136,7 @@
       <rect x="60" y="104" width="22" height="3" rx="1.5" fill="#ffb224"/>
       <text x="92" y="110" font-size="12.5" font-weight="600" letter-spacing="2.6" fill="#8d97ab">BITWIG STUDIO CONTROLLER SCRIPT</text>
       <text x="58" y="172" font-size="50" font-weight="800" letter-spacing="-1.2" fill="#f4f6fa">bitwig-akai-lpd8-mk2</text>
-      <text x="60" y="216" font-size="19" font-weight="400" fill="#aeb7c8">Clip launcher + 64 assignable knobs</text>
+      <text x="60" y="216" font-size="19" font-weight="400" fill="#aeb7c8">Knobs that follow your device + clip launcher</text>
       <text x="60" y="244" font-size="19" font-weight="400" fill="#aeb7c8">for the Akai LPD8 mk2 in Bitwig Studio</text>
 
       <line x1="60" y1="282" x2="560" y2="282" stroke="#ffffff" stroke-opacity="0.09"/>
