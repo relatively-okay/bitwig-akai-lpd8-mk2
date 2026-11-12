@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/header.png" alt="bitwig-akai-lpd8-mk2: knobs that follow your device, plus a clip launcher, for the Akai LPD8 mk2 in Bitwig Studio" width="100%">
+  <img src="assets/header.png" alt="bitwig-akai-lpd8-mk2: Akai LPD8 mk2 controller script for Bitwig Studio" width="100%">
 </p>
 
 <p align="center">
