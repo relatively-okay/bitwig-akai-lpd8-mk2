@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.png binary
+
+# Keep GitHub's "Download ZIP" to the files Bitwig needs.
+/test export-ignore
+/assets export-ignore
+/.github export-ignore
+/.gitattributes export-ignore
