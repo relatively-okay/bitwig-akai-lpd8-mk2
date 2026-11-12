@@ -172,7 +172,7 @@ Hit a clip pad to launch the clip. On a track that's armed for recording, hittin
 
 A popup tells you where you landed, for example *"Polysynth - Filter"*. A pad goes dark when there's nowhere further to go in that direction.
 
-**User banks** give you 64 more knobs (8 banks of 8) that you map yourself. Hit pad 3 (**knobs: device/user**) to switch the knobs to them, and pad 4 (**next user bank**) to step through the banks. To map one, right-click a parameter in Bitwig, choose **Map to Controller or Key**, and turn the knob. Hit pad 3 again to go back to device control.
+**User banks** let you map the knobs yourself instead: 8 banks of 8 knobs, so 64 mappings in total. Hit pad 3 (**knobs: device/user**) to switch the knobs to them, and pad 4 (**next user bank**) to step through the banks. To map one, right-click a parameter in Bitwig, choose **Map to Controller or Key**, and turn the knob. Hit pad 3 again to go back to device control.
 
 ### Your own LPD8 mk2 programs work too
 
