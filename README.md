@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/blatantly_vibe--coded_with-Claude-D97757" alt="Blatantly vibe-coded with Claude">
-  <img src="https://img.shields.io/badge/works_like_a-charm-2EA043" alt="Works like a charm">
+  <img src="https://img.shields.io/badge/but_works_like_a-f%2Acking_charm-2EA043" alt="but works like a f*cking charm">
 </p>
 
 A Bitwig Studio controller script for the **Akai LPD8 mk2**. It turns the pads into a colour-coded clip launcher, and the knobs into 8 banks of freely assignable controls. It needs no setup on the controller itself.
